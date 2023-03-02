@@ -5,6 +5,40 @@ Release History
 
 .. towncrier release notes start
 
+v20.20.0 (2023-02-28)
+---------------------
+
+Features - 20.20.0
+~~~~~~~~~~~~~~~~~~
+- Change environment variable existence check in Nushell activation script to not use deprecated command. (:issue:`2506`)
+
+Bugfixes - 20.20.0
+~~~~~~~~~~~~~~~~~~
+- Discover CPython implementations distributed on Windows by any organization - by :user:`faph`. (:issue:`2504`)
+- Upgrade embedded setuptools to ``67.4.0`` from ``67.1.0`` and pip to ``23.0.1`` from ``23.0`` - by :user:`gaborbernat`. (:issue:`2510`)
+
+
+v20.19.0 (2023-02-07)
+---------------------
+
+Features - 20.19.0
+~~~~~~~~~~~~~~~~~~
+- Allow platformdirs version ``3`` - by :user:`cdce8p`. (:issue:`2499`)
+
+
+v20.18.0 (2023-02-06)
+---------------------
+
+Features - 20.18.0
+~~~~~~~~~~~~~~~~~~
+- Drop ``3.6`` runtime support (can still create ``2.7+``) - by :user:`gaborbernat`. (:issue:`2489`)
+
+Bugfixes - 20.18.0
+~~~~~~~~~~~~~~~~~~
+- Fix broken prompt in Nushell when activating virtual environment - by :user:`kubouc`. (:issue:`2481`)
+- Bump embedded pip to ``23.0`` and setuptools to ``67.1`` - by :user:`gaborbernat`. (:issue:`2489`)
+
+
 v20.17.1 (2022-12-05)
 ---------------------
 
