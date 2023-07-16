@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import os
 from stat import S_IXGRP, S_IXOTH, S_IXUSR
 
@@ -12,7 +14,7 @@ def make_exe(filename):
                 mode |= level
             filename.chmod(mode)
             break
-        except OSError:
+        except OSError:  # noqa: PERF203
             continue
 
 

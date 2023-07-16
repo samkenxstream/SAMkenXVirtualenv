@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import logging
 import os
 import shutil
@@ -5,13 +7,13 @@ import sys
 from contextlib import contextmanager
 from functools import partial
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
 
 from virtualenv.app_data import AppDataDiskFolder
-from virtualenv.discovery.builtin import get_interpreter
 from virtualenv.discovery.py_info import PythonInfo
-from virtualenv.info import IS_WIN, fs_supports_symlink
+from virtualenv.info import IS_PYPY, IS_WIN, fs_supports_symlink
 from virtualenv.report import LOGGER
 
 
@@ -22,8 +24,8 @@ def pytest_addoption(parser):
 def pytest_configure(config):
     """Ensure randomly is called before we re-order"""
     manager = config.pluginmanager
-    # noinspection PyProtectedMember
-    order = manager.hook.pytest_collection_modifyitems._nonwrappers
+
+    order = manager.hook.pytest_collection_modifyitems._hookimpls  # noqa: SLF001
     dest = next((i for i, p in enumerate(order) if p.plugin is manager.getplugin("randomly")), None)
     if dest is not None:
         from_pos = next(i for i, p in enumerate(order) if p.plugin is manager.getplugin(__file__))
@@ -46,7 +48,7 @@ def pytest_collection_modifyitems(config, items):
 
 
 @pytest.fixture(scope="session")
-def has_symlink_support(tmp_path_factory):  # noqa: U100
+def has_symlink_support(tmp_path_factory):  # noqa: ARG001
     return fs_supports_symlink()
 
 
@@ -54,21 +56,19 @@ def has_symlink_support(tmp_path_factory):  # noqa: U100
 def link_folder(has_symlink_support):
     if has_symlink_support:
         return os.symlink
-    elif sys.platform == "win32" and sys.version_info[0:2] > (3, 4):
+    if sys.platform == "win32":
         # on Windows junctions may be used instead
-        import _winapi  # Cpython3.5 has builtin implementation for junctions
+        import _winapi
 
         return getattr(_winapi, "CreateJunction", None)
-    else:
-        return None
+    return None
 
 
 @pytest.fixture(scope="session")
 def link_file(has_symlink_support):
     if has_symlink_support:
         return os.symlink
-    else:
-        return None
+    return None
 
 
 @pytest.fixture(scope="session")
@@ -83,11 +83,10 @@ def link(link_folder, link_file):
             else:
                 shutil.copytree(s_src, s_dest)
                 clean = partial(shutil.rmtree, str(dest))
+        elif link_file:
+            link_file(s_src, s_dest)
         else:
-            if link_file:
-                link_file(s_src, s_dest)
-            else:
-                shutil.copy2(s_src, s_dest)
+            shutil.copy2(s_src, s_dest)
         return clean
 
     return _link
@@ -143,29 +142,11 @@ def _ignore_global_config(tmp_path_factory):
         yield
 
 
-@pytest.fixture(autouse=True, scope="session")
-def _pip_cert(tmp_path_factory):
-    # workaround for https://github.com/pypa/pip/issues/8984 - if the certificate is explicitly set no error can happen
-    key = "PIP_CERT"
-    if key in os.environ:
-        yield
-    else:
-        cert = tmp_path_factory.mktemp("folder") / "cert"
-        import pkgutil
-
-        cert_data = pkgutil.get_data("pip._vendor.certifi", "cacert.pem")
-        cert.write_bytes(cert_data)
-        with change_os_environ(key, str(cert)):
-            yield
-
-
 @pytest.fixture(autouse=True)
 def _check_os_environ_stable():
     old = os.environ.copy()
     # ensure we don't inherit parent env variables
-    to_clean = {
-        k for k in os.environ.keys() if k.startswith("VIRTUALENV_") or "VIRTUAL_ENV" in k or k.startswith("TOX_")
-    }
+    to_clean = {k for k in os.environ if k.startswith(("VIRTUALENV_", "TOX_")) or "VIRTUAL_ENV" in k}
     cleaned = {k: os.environ[k] for k, v in os.environ.items()}
     override = {
         "VIRTUALENV_NO_PERIODIC_UPDATE": "1",
@@ -181,7 +162,7 @@ def _check_os_environ_stable():
         raise
     finally:
         try:
-            for key in override.keys():
+            for key in override:
                 del os.environ[str(key)]
             if is_exception is False:
                 new = os.environ
@@ -262,14 +243,16 @@ if COVERAGE_RUN:
     import coverage
 
     class EnableCoverage:
-        _COV_FILE = Path(coverage.__file__)
-        _ROOT_COV_FILES_AND_FOLDERS = [i for i in _COV_FILE.parents[1].iterdir() if i.name.startswith("coverage")]
+        _COV_FILE: ClassVar[Path] = Path(coverage.__file__)
+        _ROOT_COV_FILES_AND_FOLDERS: ClassVar[list[Path]] = [
+            i for i in _COV_FILE.parents[1].iterdir() if i.name.startswith("coverage")
+        ]
 
-        def __init__(self, link):
+        def __init__(self, link) -> None:
             self.link = link
             self.targets = []
 
-        def __enter__(self, creator):
+        def __enter__(self, creator):  # noqa: PLE0302
             site_packages = creator.purelib
             for entry in self._ROOT_COV_FILES_AND_FOLDERS:
                 target = site_packages / entry.name
@@ -278,7 +261,7 @@ if COVERAGE_RUN:
                     self.targets.append((target, clean))
             return self
 
-        def __exit__(self, exc_type, exc_val, exc_tb):  # noqa: U100
+        def __exit__(self, exc_type, exc_val, exc_tb):
             for target, clean in self.targets:
                 if target.exists():
                     clean()
@@ -302,7 +285,7 @@ def special_char_name():
             trip = char.encode(encoding, errors="strict").decode(encoding)
             if char == trip:
                 result += char
-        except ValueError:
+        except ValueError:  # noqa: PERF203
             continue
     assert result
     return result
@@ -310,8 +293,7 @@ def special_char_name():
 
 @pytest.fixture()
 def special_name_dir(tmp_path, special_char_name):
-    dest = Path(str(tmp_path)) / special_char_name
-    return dest
+    return Path(str(tmp_path)) / special_char_name
 
 
 @pytest.fixture(scope="session")
@@ -345,7 +327,7 @@ def change_env_var(key, value):
         yield
     finally:
         if already_set:
-            os.environ[key] = prev_value  # type: ignore
+            os.environ[key] = prev_value
         else:
             del os.environ[key]  # pragma: no cover
 
@@ -358,18 +340,6 @@ def temp_app_data(monkeypatch, tmp_path):
 
 
 @pytest.fixture(scope="session")
-def cross_python(is_inside_ci, session_app_data):
-    spec = str(2 if sys.version_info[0] == 3 else 3)
-    interpreter = get_interpreter(spec, [], session_app_data)
-    if interpreter is None:
-        msg = f"could not find {spec}"
-        if is_inside_ci:
-            raise RuntimeError(msg)
-        pytest.skip(msg=msg)
-    return interpreter
-
-
-@pytest.fixture(scope="session")
 def for_py_version():
     return f"{sys.version_info.major}.{sys.version_info.minor}"
 
@@ -379,3 +349,16 @@ def _skip_if_test_in_system(session_app_data):
     current = PythonInfo.current(session_app_data)
     if current.system_executable is not None:
         pytest.skip("test not valid if run under system")
+
+
+if IS_PYPY:
+
+    @pytest.fixture()
+    def time_freeze(freezer):
+        return freezer.move_to
+
+else:
+
+    @pytest.fixture()
+    def time_freeze(time_machine):
+        return lambda s: time_machine.move_to(s, tick=False)

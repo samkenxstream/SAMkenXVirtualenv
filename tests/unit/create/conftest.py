@@ -7,89 +7,37 @@ It's possible to use multiple types of host pythons to create virtual environmen
 - invoking from our own venv
 """
 
-import subprocess
+from __future__ import annotations
+
 import sys
-from pathlib import Path
 from subprocess import Popen
 
 import pytest
 
 from virtualenv.discovery.py_info import PythonInfo
-from virtualenv.info import IS_WIN
-from virtualenv.run import cli_run
 
 CURRENT = PythonInfo.current_system()
 
 
-# noinspection PyUnusedLocal
-def root(tmp_path_factory, session_app_data):  # noqa: U100
+def root(tmp_path_factory, session_app_data):  # noqa: ARG001
     return CURRENT.system_executable
 
 
 def venv(tmp_path_factory, session_app_data):
     if CURRENT.is_venv:
         return sys.executable
-    elif CURRENT.version_info.major == 3:
-        root_python = root(tmp_path_factory, session_app_data)
-        dest = tmp_path_factory.mktemp("venv")
-        process = Popen([str(root_python), "-m", "venv", "--without-pip", str(dest)])
-        process.communicate()
-        # sadly creating a virtual environment does not tell us where the executable lives in general case
-        # so discover using some heuristic
-        exe_path = CURRENT.discover_exe(prefix=str(dest)).original_executable
-        return exe_path
-
-
-def old_virtualenv(tmp_path_factory, session_app_data):
-    if CURRENT.is_old_virtualenv:
-        return CURRENT.executable
-    else:
-        env_for_old_virtualenv = tmp_path_factory.mktemp("env-for-old-virtualenv")
-        result = cli_run(["--no-download", "--activators", "", str(env_for_old_virtualenv), "--no-periodic-update"])
-        # noinspection PyBroadException
-        try:
-            process = Popen(
-                [
-                    str(result.creator.script("pip")),
-                    "install",
-                    "--no-index",
-                    "--disable-pip-version-check",
-                    str(Path(__file__).resolve().parent / "virtualenv-16.7.9-py2.py3-none-any.whl"),
-                    "-v",
-                ],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-            )
-            _, __ = process.communicate()
-            assert not process.returncode
-        except Exception:
-            return RuntimeError("failed to install old virtualenv")
-        # noinspection PyBroadException
-        try:
-            old_virtualenv_at = tmp_path_factory.mktemp("old-virtualenv")
-            cmd = [
-                str(result.creator.script("virtualenv")),
-                str(old_virtualenv_at),
-                "--no-pip",
-                "--no-setuptools",
-                "--no-wheel",
-            ]
-            process = Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            _, __ = process.communicate()
-            assert not process.returncode
-            if result.creator.interpreter.implementation == "PyPy" and IS_WIN:
-                # old virtualenv creates pypy paths wrong on windows, so have to hardcode it
-                return str(old_virtualenv_at / "bin" / "pypy.exe")
-            exe_path = CURRENT.discover_exe(session_app_data, prefix=str(old_virtualenv_at)).original_executable
-            return exe_path
-        except Exception as exception:
-            return RuntimeError(f"failed to create old virtualenv {exception}")
+    root_python = root(tmp_path_factory, session_app_data)
+    dest = tmp_path_factory.mktemp("venv")
+    process = Popen([str(root_python), "-m", "venv", "--without-pip", str(dest)])
+    process.communicate()
+    # sadly creating a virtual environment does not tell us where the executable lives in general case
+    # so discover using some heuristic
+    return CURRENT.discover_exe(prefix=str(dest)).original_executable
 
 
 PYTHON = {
     "root": root,
     "venv": venv,
-    "old_virtualenv": old_virtualenv,
 }
 
 

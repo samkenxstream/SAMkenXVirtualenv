@@ -1,9 +1,12 @@
+from __future__ import annotations
+
 import contextlib
 import os
 import sys
 from stat import S_IWGRP, S_IWOTH, S_IWUSR
 from subprocess import Popen, check_call
 from threading import Thread
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -13,6 +16,11 @@ from virtualenv.info import fs_supports_symlink
 from virtualenv.run import cli_run
 from virtualenv.seed.wheels.embed import BUNDLE_FOLDER, BUNDLE_SUPPORT
 from virtualenv.util.path import safe_delete
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from pytest_mock import MockerFixture
 
 
 @pytest.mark.slow()
@@ -102,7 +110,7 @@ def test_seed_link_via_app_data(tmp_path, coverage_env, current_fastest, copies)
     # Windows does not allow removing a executable while running it, so when uninstalling pip we need to do it via
     # python -m pip
     remove_cmd = [str(result.creator.exe), "-m", "pip"] + remove_cmd[1:]
-    process = Popen(remove_cmd + ["pip", "wheel"])
+    process = Popen([*remove_cmd, "pip", "wheel"])
     _, __ = process.communicate()
     assert not process.returncode
     # pip is greedy here, removing all packages removes the site-package too
@@ -113,9 +121,6 @@ def test_seed_link_via_app_data(tmp_path, coverage_env, current_fastest, copies)
         post_run = set(site_package.iterdir()) - patch_files
         assert not post_run, "\n".join(str(i) for i in post_run)
 
-    if sys.version_info[0:2] == (3, 4) and os.environ.get("PIP_REQ_TRACKER"):
-        os.environ.pop("PIP_REQ_TRACKER")
-
 
 @contextlib.contextmanager
 def read_only_dir(d):
@@ -123,16 +128,16 @@ def read_only_dir(d):
     for root, _, filenames in os.walk(str(d)):
         os.chmod(root, os.stat(root).st_mode & ~write)
         for filename in filenames:
-            filename = os.path.join(root, filename)
-            os.chmod(filename, os.stat(filename).st_mode & ~write)
+            name = os.path.join(root, filename)
+            os.chmod(name, os.stat(name).st_mode & ~write)
     try:
         yield
     finally:
         for root, _, filenames in os.walk(str(d)):
             os.chmod(root, os.stat(root).st_mode | write)
             for filename in filenames:
-                filename = os.path.join(root, filename)
-                os.chmod(filename, os.stat(filename).st_mode | write)
+                name = os.path.join(root, filename)
+                os.chmod(name, os.stat(name).st_mode | write)
 
 
 @pytest.fixture()
@@ -166,12 +171,12 @@ def test_populated_read_only_cache_and_symlinked_app_data(tmp_path, current_fast
     assert cli_run(cmd)
     check_call((str(dest.joinpath("bin/python")), "-c", "import pip"))
 
-    cached_py_info._CACHE.clear()  # necessary to re-trigger py info discovery
+    cached_py_info._CACHE.clear()  # necessary to re-trigger py info discovery  # noqa: SLF001
     safe_delete(dest)
 
     # should succeed with special flag when read-only
     with read_only_dir(temp_app_data):
-        assert cli_run(["--read-only-app-data"] + cmd)
+        assert cli_run(["--read-only-app-data", *cmd])
         check_call((str(dest.joinpath("bin/python")), "-c", "import pip"))
 
 
@@ -191,19 +196,19 @@ def test_populated_read_only_cache_and_copied_app_data(tmp_path, current_fastest
 
     assert cli_run(cmd)
 
-    cached_py_info._CACHE.clear()  # necessary to re-trigger py info discovery
+    cached_py_info._CACHE.clear()  # necessary to re-trigger py info discovery  # noqa: SLF001
     safe_delete(dest)
 
     # should succeed with special flag when read-only
     with read_only_dir(temp_app_data):
-        assert cli_run(["--read-only-app-data"] + cmd)
+        assert cli_run(["--read-only-app-data", *cmd])
 
 
 @pytest.mark.slow()
 @pytest.mark.parametrize("pkg", ["pip", "setuptools", "wheel"])
 @pytest.mark.usefixtures("session_app_data", "current_fastest", "coverage_env")
 def test_base_bootstrap_link_via_app_data_no(tmp_path, pkg):
-    create_cmd = [str(tmp_path), "--seeder", "app-data", f"--no-{pkg}"]
+    create_cmd = [str(tmp_path), "--seeder", "app-data", f"--no-{pkg}", "--wheel", "bundle", "--setuptools", "bundle"]
     result = cli_run(create_cmd)
     assert not (result.creator.purelib / pkg).exists()
     for key in {"pip", "setuptools", "wheel"} - {pkg}:
@@ -217,7 +222,7 @@ def test_app_data_parallel_ok(tmp_path):
 
 
 @pytest.mark.usefixtures("temp_app_data")
-def test_app_data_parallel_fail(tmp_path, mocker):
+def test_app_data_parallel_fail(tmp_path: Path, mocker: MockerFixture) -> None:
     mocker.patch("virtualenv.seed.embed.via_app_data.pip_install.base.PipInstall.build_image", side_effect=RuntimeError)
     exceptions = _run_parallel_threads(tmp_path)
     assert len(exceptions) == 2
@@ -231,8 +236,8 @@ def _run_parallel_threads(tmp_path):
 
     def _run(name):
         try:
-            cli_run(["--seeder", "app-data", str(tmp_path / name), "--no-pip", "--no-setuptools"])
-        except Exception as exception:
+            cli_run(["--seeder", "app-data", str(tmp_path / name), "--no-pip", "--no-setuptools", "--wheel", "bundle"])
+        except Exception as exception:  # noqa: BLE001
             as_str = str(exception)
             exceptions.append(as_str)
 

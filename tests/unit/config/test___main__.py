@@ -1,15 +1,26 @@
+from __future__ import annotations
+
 import re
 import sys
 from subprocess import PIPE, Popen, check_output
+from typing import TYPE_CHECKING
 
 import pytest
 
 from virtualenv.__main__ import run_with_catch
-from virtualenv.util.error import ProcessCallFailed
+from virtualenv.util.error import ProcessCallFailedError
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def test_main():
-    process = Popen([sys.executable, "-m", "virtualenv", "--help"], universal_newlines=True, stdout=PIPE)
+    process = Popen(
+        [sys.executable, "-m", "virtualenv", "--help"],
+        universal_newlines=True,
+        stdout=PIPE,
+        encoding="utf-8",
+    )
     out, _ = process.communicate()
     assert not process.returncode
     assert out
@@ -32,7 +43,7 @@ def raise_on_session_done(mocker):
 
 
 def test_fail_no_traceback(raise_on_session_done, tmp_path, capsys):
-    raise_on_session_done(ProcessCallFailed(code=2, out="out\n", err="err\n", cmd=["something"]))
+    raise_on_session_done(ProcessCallFailedError(code=2, out="out\n", err="err\n", cmd=["something"]))
     with pytest.raises(SystemExit) as context:
         run_with_catch([str(tmp_path)])
     assert context.value.code == 2
@@ -47,15 +58,15 @@ def test_fail_with_traceback(raise_on_session_done, tmp_path, capsys):
     with pytest.raises(TypeError, match="something bad"):
         run_with_catch([str(tmp_path), "--with-traceback"])
     out, err = capsys.readouterr()
-    assert out == ""
-    assert err == ""
+    assert not out
+    assert not err
 
 
 @pytest.mark.usefixtures("session_app_data")
-def test_session_report_full(tmp_path, capsys):
-    run_with_catch([str(tmp_path)])
+def test_session_report_full(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    run_with_catch([str(tmp_path), "--setuptools", "bundle", "--wheel", "bundle"])
     out, err = capsys.readouterr()
-    assert err == ""
+    assert not err
     lines = out.splitlines()
     regexes = [
         r"created virtual environment .* in \d+ms",
@@ -77,7 +88,7 @@ def _match_regexes(lines, regexes):
 def test_session_report_minimal(tmp_path, capsys):
     run_with_catch([str(tmp_path), "--activators", "", "--without-pip"])
     out, err = capsys.readouterr()
-    assert err == ""
+    assert not err
     lines = out.splitlines()
     regexes = [
         r"created virtual environment .* in \d+ms",
@@ -92,6 +103,7 @@ def test_session_report_subprocess(tmp_path):
     out = check_output(
         [sys.executable, "-m", "virtualenv", str(tmp_path), "--activators", "powershell", "--without-pip"],
         text=True,
+        encoding="utf-8",
     )
     lines = out.split("\n")
     regexes = [

@@ -1,8 +1,11 @@
+from __future__ import annotations
+
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from subprocess import CalledProcessError
+from typing import TYPE_CHECKING, Callable
 
 import pytest
 
@@ -11,6 +14,11 @@ from virtualenv.seed.wheels.acquire import download_wheel, get_wheel, pip_wheel_
 from virtualenv.seed.wheels.embed import BUNDLE_FOLDER, get_embed_wheel
 from virtualenv.seed.wheels.periodic_update import dump_datetime
 from virtualenv.seed.wheels.util import Wheel, discover_wheels
+
+if TYPE_CHECKING:
+    from unittest.mock import MagicMock
+
+    from pytest_mock import MockerFixture
 
 
 @pytest.fixture(autouse=True)
@@ -57,7 +65,7 @@ def test_download_fails(mocker, for_py_version, session_app_data):
 
     as_path = mocker.MagicMock()
     with pytest.raises(CalledProcessError) as context:
-        download_wheel("pip", "==1", for_py_version, [], session_app_data, as_path, os.environ),
+        download_wheel("pip", "==1", for_py_version, [], session_app_data, as_path, os.environ)
     exc = context.value
     assert exc.output == "out"
     assert exc.stderr == "err"
@@ -111,8 +119,14 @@ def test_get_wheel_download_not_called(mocker, for_py_version, session_app_data,
     assert write.call_count == 0
 
 
-@pytest.mark.usefixtures("freezer")
-def test_get_wheel_download_cached(tmp_path, mocker, for_py_version, downloaded_wheel):
+def test_get_wheel_download_cached(
+    tmp_path: Path,
+    mocker: MockerFixture,
+    for_py_version: str,
+    downloaded_wheel: tuple[Wheel, MagicMock],
+    time_freeze: Callable[[datetime], None],
+) -> None:
+    time_freeze(datetime.now(tz=timezone.utc))
     from virtualenv.app_data.via_disk_folder import JSONStoreDisk
 
     app_data = AppDataDiskFolder(folder=str(tmp_path))
@@ -139,7 +153,7 @@ def test_get_wheel_download_cached(tmp_path, mocker, for_py_version, downloaded_
             {
                 "filename": expected.name,
                 "release_date": None,
-                "found_date": dump_datetime(datetime.now()),
+                "found_date": dump_datetime(datetime.now(tz=timezone.utc)),
                 "source": "download",
             },
         ],

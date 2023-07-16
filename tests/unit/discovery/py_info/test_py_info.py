@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import copy
 import functools
 import itertools
@@ -15,13 +17,13 @@ import pytest
 from virtualenv.discovery import cached_py_info
 from virtualenv.discovery.py_info import PythonInfo, VersionInfo
 from virtualenv.discovery.py_spec import PythonSpec
-from virtualenv.info import IS_PYPY, fs_supports_symlink
+from virtualenv.info import IS_PYPY, IS_WIN, fs_supports_symlink
 
 CURRENT = PythonInfo.current_system()
 
 
 def test_current_as_json():
-    result = CURRENT._to_json()
+    result = CURRENT._to_json()  # noqa: SLF001
     parsed = json.loads(result)
     a, b, c, d, e = sys.version_info
     assert parsed["version_info"] == {"major": a, "minor": b, "micro": c, "releaselevel": d, "serial": e}
@@ -142,6 +144,7 @@ def test_py_info_cache_clear(mocker, session_app_data):
     assert spy.call_count >= 2 * count
 
 
+@pytest.mark.xfail(IS_PYPY and IS_WIN and sys.version_info[0:2] == (3, 9), reason="symlink is not supported")
 @pytest.mark.skipif(not fs_supports_symlink(), reason="symlink is not supported")
 def test_py_info_cached_symlink(mocker, tmp_path, session_app_data):
     spy = mocker.spy(cached_py_info, "_run_subprocess")
@@ -156,7 +159,7 @@ def test_py_info_cached_symlink(mocker, tmp_path, session_app_data):
     new_exe.symlink_to(sys.executable)
     pyvenv = Path(sys.executable).parents[1] / "pyvenv.cfg"
     if pyvenv.exists():
-        (tmp_path / pyvenv.name).write_text(pyvenv.read_text())
+        (tmp_path / pyvenv.name).write_text(pyvenv.read_text(encoding="utf-8"), encoding="utf-8")
     new_exe_str = str(new_exe)
     second_result = PythonInfo.from_exe(new_exe_str, session_app_data)
     assert second_result.executable == new_exe_str
@@ -195,7 +198,15 @@ PyInfoMock = namedtuple("PyInfoMock", ["implementation", "architecture", "versio
         ),
     ],
 )
-def test_system_executable_no_exact_match(target, discovered, position, tmp_path, mocker, caplog, session_app_data):
+def test_system_executable_no_exact_match(  # noqa: PLR0913
+    target,
+    discovered,
+    position,
+    tmp_path,
+    mocker,
+    caplog,
+    session_app_data,
+):
     """Here we should fallback to other compatible"""
     caplog.set_level(logging.DEBUG)
 
@@ -211,7 +222,7 @@ def test_system_executable_no_exact_match(target, discovered, position, tmp_path
     selected = None
     for pos, i in enumerate(discovered):
         path = tmp_path / str(pos)
-        path.write_text("")
+        path.write_text("", encoding="utf-8")
         py_info = _make_py_info(i)
         py_info.system_executable = CURRENT.system_executable
         py_info.executable = CURRENT.system_executable
@@ -225,8 +236,7 @@ def test_system_executable_no_exact_match(target, discovered, position, tmp_path
     mocker.patch.object(target_py_info, "_find_possible_exe_names", return_value=names)
     mocker.patch.object(target_py_info, "_find_possible_folders", return_value=[str(tmp_path)])
 
-    # noinspection PyUnusedLocal
-    def func(k, app_data, resolve_to_host, raise_on_error, env):  # noqa: U100
+    def func(k, app_data, resolve_to_host, raise_on_error, env):  # noqa: ARG001
         return discovered_with_path[k]
 
     mocker.patch.object(target_py_info, "from_exe", side_effect=func)
@@ -234,7 +244,7 @@ def test_system_executable_no_exact_match(target, discovered, position, tmp_path
 
     target_py_info.system_executable = None
     target_py_info.executable = str(tmp_path)
-    mapped = target_py_info._resolve_to_system(session_app_data, target_py_info)
+    mapped = target_py_info._resolve_to_system(session_app_data, target_py_info)  # noqa: SLF001
     assert mapped.system_executable == CURRENT.system_executable
     found = discovered_with_path[mapped.base_executable]
     assert found is selected
@@ -259,7 +269,7 @@ def test_py_info_ignores_distutils_config(monkeypatch, tmp_path):
     install_scripts={tmp_path}{os.sep}scripts
     install_data={tmp_path}{os.sep}data
     """
-    (tmp_path / "setup.cfg").write_text(dedent(raw))
+    (tmp_path / "setup.cfg").write_text(dedent(raw), encoding="utf-8")
     monkeypatch.chdir(tmp_path)
     py_info = PythonInfo.from_exe(sys.executable)
     distutils = py_info.distutils_install
@@ -289,7 +299,7 @@ def test_discover_exe_on_path_non_spec_name_not_match(mocker):
     assert CURRENT.satisfies(spec, impl_must_match=True) is False
 
 
-@pytest.mark.skipif(IS_PYPY, reason="setuptools distutil1s patching does not work")
+@pytest.mark.skipif(IS_PYPY, reason="setuptools distutils patching does not work")
 def test_py_info_setuptools():
     from setuptools.dist import Distribution
 
@@ -343,9 +353,6 @@ def test_custom_venv_install_scheme_is_prefered(mocker):
         # define the prefix as sysconfig.get_preferred_scheme did before 3.11
         sysconfig_install_schemes["nt" if os.name == "nt" else "posix_prefix"] = default_scheme
 
-    if sys.version_info[0] == 2:
-        sysconfig_install_schemes = _stringify_schemes_dict(sysconfig_install_schemes)
-
     # On Python < 3.10, the distutils schemes are not derived from sysconfig schemes
     # So we mock them as well to assert the custom "venv" install scheme has priority
     distutils_scheme = {
@@ -359,9 +366,6 @@ def test_custom_venv_install_scheme_is_prefered(mocker):
         "unix_prefix": distutils_scheme,
         "nt": distutils_scheme,
     }
-
-    if sys.version_info[0] == 2:
-        distutils_schemes = _stringify_schemes_dict(distutils_schemes)
 
     # We need to mock distutils first, so they don't see the mocked sysconfig,
     # if imported for the first time.
@@ -386,7 +390,7 @@ def test_fallback_existent_system_executable(mocker):
     # that "python" is not required and the standard `make install` does not provide one
 
     # Falsify some data to look like we're in a venv
-    current.prefix = current.exec_prefix = "/tmp/tmp.izZNCyINRj/venv"
+    current.prefix = current.exec_prefix = "/tmp/tmp.izZNCyINRj/venv"  # noqa: S108
     current.executable = current.original_executable = os.path.join(current.prefix, "bin/python")
 
     # Since we don't know if the distribution we're on provides python, use a binary that should not exist
@@ -394,7 +398,7 @@ def test_fallback_existent_system_executable(mocker):
     mocker.patch.object(sys, "executable", current.executable)
 
     # ensure it falls back to an alternate binary name that exists
-    current._fast_get_system_executable()
+    current._fast_get_system_executable()  # noqa: SLF001
     assert os.path.basename(current.system_executable) in [
         f"python{v}" for v in (current.version_info.major, f"{current.version_info.major}.{current.version_info.minor}")
     ]
